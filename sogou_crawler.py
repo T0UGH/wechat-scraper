@@ -108,11 +108,13 @@ class SogouCrawler:
                         break
                     article_filtered = self._parse_article_item(item, account_name)
                     if article_filtered:
+                        article_filtered["url"] = self._resolve_url(article_filtered["url"])
                         articles.append(article_filtered)
                     # 也收集未过滤结果，以备回退
                     if filter_active and len(all_raw) < limit:
                         article_raw = self._parse_article_item(item, "")
                         if article_raw:
+                            article_raw["url"] = self._resolve_url(article_raw["url"])
                             all_raw.append(article_raw)
 
                 # 若前 3 页过滤后仍无结果，切换到不过滤模式
@@ -185,6 +187,28 @@ class SogouCrawler:
             "cover_url": cover_el.get("src", "") if cover_el else "",
             "source": source_el.get_text(strip=True) if source_el else "",
         }
+
+    def _resolve_url(self, url: str) -> str:
+        """跟随搜狗跳转链接，返回真实的微信文章 URL。
+        若已是 mp.weixin.qq.com 地址则直接返回。
+        跳转失败时返回原 URL。
+        """
+        if "mp.weixin.qq.com" in url:
+            return url
+        if "weixin.sogou.com/link" not in url:
+            return url
+        tab = self.context.new_page()
+        try:
+            tab.goto(url, timeout=20000, wait_until="domcontentloaded")
+            try:
+                tab.wait_for_url("**/mp.weixin.qq.com/**", timeout=8000)
+            except PlaywrightTimeoutError:
+                pass
+            return tab.url
+        except Exception:
+            return url
+        finally:
+            tab.close()
 
     def _extract_fakeid(self, url: str, html: str) -> str:
         """从 URL 或 HTML 中提取 fakeid"""

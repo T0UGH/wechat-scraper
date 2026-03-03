@@ -43,6 +43,12 @@ class ArticleCrawler:
             if HAS_STEALTH:
                 stealth_sync(page)
             page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            # 搜狗链接会经过跳转才到达真实微信文章页，等待最终落地
+            if "weixin.sogou.com" in page.url:
+                try:
+                    page.wait_for_url("**/mp.weixin.qq.com/**", timeout=10000)
+                except PlaywrightTimeoutError:
+                    pass
             try:
                 page.wait_for_selector("#js_content", timeout=10000)
             except PlaywrightTimeoutError:
