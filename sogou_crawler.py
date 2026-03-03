@@ -72,6 +72,78 @@ class SogouCrawler:
             "avatar_url": avatar_el.get("src", "") if avatar_el else "",
         }
 
+    def get_article_list(self, account_name: str, limit: int = 100) -> list[dict]:
+        """翻页抓取文章列表元数据"""
+        articles = []
+        page = 1
+        while len(articles) < limit:
+            params = {"type": 2, "query": account_name, "page": page}
+            resp = self.session.get(
+                SOGOU_SEARCH_URL, params=params, headers=self._headers(), timeout=10
+            )
+            resp.raise_for_status()
+
+            if "请输入验证码" in resp.text or "antispider" in resp.url:
+                print(f"\n[!] 搜狗触发验证码，请手动处理后按 Enter 继续...")
+                input()
+                continue
+
+            soup = BeautifulSoup(resp.text, "lxml")
+            items = soup.select(".news-box .news-list li")
+            if not items:
+                print(f"[i] 第 {page} 页无结果，停止翻页")
+                break
+
+            for item in items:
+                if len(articles) >= limit:
+                    break
+                article = self._parse_article_item(item, account_name)
+                if article:
+                    articles.append(article)
+
+            page += 1
+            self._sleep()
+
+        return articles
+
+    def _parse_article_item(self, item, account_name: str) -> dict | None:
+        """解析单条文章搜索结果"""
+        title_el = item.select_one("h3 a")
+        if not title_el:
+            return None
+
+        source_el = item.select_one(".account")
+        if source_el and account_name not in source_el.get_text():
+            return None
+
+        digest_el = item.select_one("p.txt-info")
+        date_el = item.select_one("label.s2, span.s2, .time")
+        cover_el = item.select_one("img")
+
+        url = title_el.get("href", "")
+        if url.startswith("/"):
+            url = "https://weixin.sogou.com" + url
+
+        publish_date = ""
+        if date_el:
+            ts = date_el.get("t")
+            if ts:
+                import datetime
+                publish_date = datetime.datetime.fromtimestamp(
+                    int(ts)
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                publish_date = date_el.get_text(strip=True)
+
+        return {
+            "title": title_el.get_text(strip=True),
+            "url": url,
+            "digest": digest_el.get_text(strip=True) if digest_el else "",
+            "publish_date": publish_date,
+            "cover_url": cover_el.get("src", "") if cover_el else "",
+            "source": source_el.get_text(strip=True) if source_el else "",
+        }
+
     def _extract_fakeid(self, url: str, html: str) -> str:
         """从 URL 或 HTML 中提取 fakeid"""
         match = re.search(r"fakeid=([a-zA-Z0-9_-]+)", url)

@@ -19,3 +19,15 @@ def test_search_account_returns_fakeid():
     assert "fakeid" in result
     assert len(result["fakeid"]) > 0
     assert "name" in result
+
+
+def test_get_article_list_returns_articles():
+    """抓取文章列表应返回包含必要字段的列表"""
+    crawler = SogouCrawler()
+    articles = crawler.get_article_list("人民日报", limit=5)
+    assert isinstance(articles, list)
+    assert len(articles) > 0
+    first = articles[0]
+    assert "title" in first
+    assert "url" in first
+    assert "publish_date" in first
