@@ -1,7 +1,7 @@
 import sys
 import pytest
 sys.path.insert(0, '..')
-from sogou_crawler import SogouCrawler
+from sogou_crawler import SogouCrawler, CaptchaRequiredError
 
 def test_search_account_returns_fakeid():
     """搜索公众号应返回包含 fakeid 的结果
@@ -24,7 +24,10 @@ def test_search_account_returns_fakeid():
 def test_get_article_list_returns_articles():
     """抓取文章列表应返回包含必要字段的列表"""
     crawler = SogouCrawler()
-    articles = crawler.get_article_list("人民日报", limit=5)
+    try:
+        articles = crawler.get_article_list("人民日报", limit=5)
+    except CaptchaRequiredError:
+        pytest.skip("搜狗触发验证码保护，跳过网络依赖测试")
     if not articles:
         pytest.skip("搜狗未返回文章（可能触发反爬虫保护），跳过网络依赖测试")
     assert isinstance(articles, list)
