@@ -3,6 +3,7 @@ import requests
 import time
 import random
 import re
+import datetime
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
@@ -112,28 +113,36 @@ class SogouCrawler:
         if not title_el:
             return None
 
-        source_el = item.select_one(".account")
-        if source_el and account_name not in source_el.get_text():
-            return None
+        # 公众号名称在 .all-time-y2（不再使用不存在的 .account selector）
+        source_el = item.select_one(".all-time-y2")
 
         digest_el = item.select_one("p.txt-info")
-        date_el = item.select_one("label.s2, span.s2, .time")
         cover_el = item.select_one("img")
 
         url = title_el.get("href", "")
         if url.startswith("/"):
             url = "https://weixin.sogou.com" + url
 
+        # 先尝试 script 标签内的时间戳（搜狗实际结构）
         publish_date = ""
-        if date_el:
-            ts = date_el.get("t")
-            if ts:
-                import datetime
+        script_el = item.select_one("span.s2 script, label.s2 script")
+        if script_el:
+            m = re.search(r"timeConvert\('(\d+)'\)", script_el.string or "")
+            if m:
                 publish_date = datetime.datetime.fromtimestamp(
-                    int(ts)
+                    int(m.group(1))
                 ).strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                publish_date = date_el.get_text(strip=True)
+        else:
+            # fallback: 尝试 "t" 属性或直接文本
+            date_el = item.select_one("label.s2, span.s2, .time")
+            if date_el:
+                ts = date_el.get("t")
+                if ts:
+                    publish_date = datetime.datetime.fromtimestamp(
+                        int(ts)
+                    ).strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    publish_date = date_el.get_text(strip=True)
 
         return {
             "title": title_el.get_text(strip=True),
