@@ -9,6 +9,12 @@ from fake_useragent import UserAgent
 
 SOGOU_SEARCH_URL = "https://weixin.sogou.com/weixin"
 
+
+class CaptchaRequiredError(Exception):
+    """搜狗触发验证码保护，需要人工干预"""
+    pass
+
+
 class SogouCrawler:
     def __init__(self, delay_min=1.0, delay_max=3.0):
         self.delay_min = delay_min
@@ -75,6 +81,7 @@ class SogouCrawler:
 
     def get_article_list(self, account_name: str, limit: int = 100) -> list[dict]:
         """翻页抓取文章列表元数据"""
+        MAX_PAGES = 50
         articles = []
         page = 1
         while len(articles) < limit:
@@ -85,9 +92,7 @@ class SogouCrawler:
             resp.raise_for_status()
 
             if "请输入验证码" in resp.text or "antispider" in resp.url:
-                print(f"\n[!] 搜狗触发验证码，请手动处理后按 Enter 继续...")
-                input()
-                continue
+                raise CaptchaRequiredError("搜狗触发验证码保护，请在浏览器中手动处理后重试")
 
             soup = BeautifulSoup(resp.text, "lxml")
             items = soup.select(".news-box .news-list li")
@@ -103,6 +108,9 @@ class SogouCrawler:
                     articles.append(article)
 
             page += 1
+            if page > MAX_PAGES:
+                print(f"[i] 已达最大翻页限制 {MAX_PAGES} 页，停止")
+                break
             self._sleep()
 
         return articles
@@ -115,6 +123,9 @@ class SogouCrawler:
 
         # 公众号名称在 .all-time-y2（不再使用不存在的 .account selector）
         source_el = item.select_one(".all-time-y2")
+        # 过滤非目标公众号的文章（仅在能识别来源时过滤）
+        if source_el and account_name and account_name not in source_el.get_text():
+            return None
 
         digest_el = item.select_one("p.txt-info")
         cover_el = item.select_one("img")
