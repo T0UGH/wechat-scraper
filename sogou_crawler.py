@@ -1,11 +1,8 @@
 from __future__ import annotations
-import requests
-import time
-import random
 import re
 import datetime
 from bs4 import BeautifulSoup
-from fake_useragent import UserAgent
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError, Page
 
 SOGOU_SEARCH_URL = "https://weixin.sogou.com/weixin"
 
@@ -16,102 +13,128 @@ class CaptchaRequiredError(Exception):
 
 
 class SogouCrawler:
-    def __init__(self, delay_min=1.0, delay_max=3.0):
-        self.delay_min = delay_min
-        self.delay_max = delay_max
-        self.ua = UserAgent()
-        self.session = requests.Session()
-
-    def _headers(self):
-        return {
-            "User-Agent": self.ua.random,
-            "Referer": "https://weixin.sogou.com/",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        }
-
-    def _sleep(self):
-        time.sleep(random.uniform(self.delay_min, self.delay_max))
-
-    def search_account(self, account_name: str) -> dict | None:
-        """搜索公众号，返回 {name, fakeid, account_id, intro, avatar_url}
-
-        注意：搜狗微信搜索会对爬虫进行反爬虫保护，包括：
-        - JS 动态渲染结果（.news-list2 / .news-list 由 JavaScript 填充）
-        - 验证码拦截
-        如遇到这些情况，本方法返回 None。
+    def __init__(self, headless: bool = True, delay_ms: int = 2000):
         """
-        params = {"type": 1, "query": account_name}
-        resp = self.session.get(
-            SOGOU_SEARCH_URL, params=params, headers=self._headers(), timeout=10
+        headless: 是否无头模式。遭遇验证码时建议改为 False 以便手动处理。
+        delay_ms: 每次翻页后等待时间（毫秒）。
+        """
+        self.headless = headless
+        self.delay_ms = delay_ms
+        self._playwright = sync_playwright().start()
+        self.browser = self._playwright.chromium.launch(
+            headless=headless,
+            args=["--disable-blink-features=AutomationControlled"],
         )
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "lxml")
-
-        # 搜狗可能通过 JS 动态填充 .news-list2 或 .news-list
-        # 静态 HTML 可能只有空的 .news-box
-        items = soup.select(".news-box .news-list li")
-        if not items:
-            items = soup.select(".news-list2 li")
-        if not items:
-            return None
-
-        item = items[0]
-        link = item.select_one("a[href]")
-        if not link:
-            return None
-
-        href = link.get("href", "")
-        name_el = item.select_one(".tit")
-        intro_el = item.select_one(".txt-info")
-        avatar_el = item.select_one("img")
-
-        detail_url = "https://weixin.sogou.com" + href if href.startswith("/") else href
-        self._sleep()
-        detail_resp = self.session.get(
-            detail_url, headers=self._headers(), timeout=10, allow_redirects=True
+        self.context = self.browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="zh-CN",
+            viewport={"width": 1280, "height": 800},
         )
-        fakeid = self._extract_fakeid(detail_resp.url, detail_resp.text)
 
-        return {
-            "name": name_el.get_text(strip=True) if name_el else account_name,
-            "fakeid": fakeid,
-            "intro": intro_el.get_text(strip=True) if intro_el else "",
-            "avatar_url": avatar_el.get("src", "") if avatar_el else "",
-        }
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def close(self):
+        try:
+            self.context.close()
+        except Exception:
+            pass
+        try:
+            self.browser.close()
+        except Exception:
+            pass
+        try:
+            self._playwright.stop()
+        except Exception:
+            pass
+
+    def _check_captcha(self, page: Page):
+        """检测当前页面是否出现验证码，若出现则抛出异常"""
+        if (
+            page.query_selector("#verify_con") is not None
+            or page.query_selector(".gt_container") is not None
+            or "antispider" in page.url
+            or "请输入验证码" in page.content()
+        ):
+            raise CaptchaRequiredError(
+                "搜狗触发验证码保护，请使用 --no-headless 模式手动处理后重试"
+            )
 
     def get_article_list(self, account_name: str, limit: int = 100) -> list[dict]:
-        """翻页抓取文章列表元数据"""
+        """用 Playwright 翻页抓取文章列表元数据。
+
+        先按来源过滤，只保留来自目标公众号的文章。
+        若前 3 页搜索结果全被过滤（说明搜狗关键词搜索未能召回该账号文章），
+        则自动切换为不过滤模式并打印提示。
+        """
         MAX_PAGES = 50
-        articles = []
-        page = 1
-        while len(articles) < limit:
-            params = {"type": 2, "query": account_name, "page": page}
-            resp = self.session.get(
-                SOGOU_SEARCH_URL, params=params, headers=self._headers(), timeout=10
-            )
-            resp.raise_for_status()
+        articles: list[dict] = []
+        all_raw: list[dict] = []  # 未过滤的原始结果，仅在回退时使用
+        filter_active = True
+        page = self.context.new_page()
+        try:
+            current_page = 1
+            while len(articles) < limit:
+                url = f"{SOGOU_SEARCH_URL}?type=2&query={account_name}&page={current_page}"
+                page.goto(url, timeout=30000, wait_until="domcontentloaded")
 
-            if "请输入验证码" in resp.text or "antispider" in resp.url:
-                raise CaptchaRequiredError("搜狗触发验证码保护，请在浏览器中手动处理后重试")
-
-            soup = BeautifulSoup(resp.text, "lxml")
-            items = soup.select(".news-box .news-list li")
-            if not items:
-                print(f"[i] 第 {page} 页无结果，停止翻页")
-                break
-
-            for item in items:
-                if len(articles) >= limit:
+                # 等待文章列表渲染（最多10秒）
+                try:
+                    page.wait_for_selector(".news-box .news-list li", timeout=10000)
+                except PlaywrightTimeoutError:
+                    # 可能是验证码或无结果
+                    self._check_captcha(page)
+                    print(f"[i] 第 {current_page} 页无结果，停止翻页")
                     break
-                article = self._parse_article_item(item, account_name)
-                if article:
-                    articles.append(article)
 
-            page += 1
-            if page > MAX_PAGES:
-                print(f"[i] 已达最大翻页限制 {MAX_PAGES} 页，停止")
-                break
-            self._sleep()
+                self._check_captcha(page)
+
+                # 用 BeautifulSoup 解析渲染后的 HTML
+                soup = BeautifulSoup(page.content(), "lxml")
+                items = soup.select(".news-box .news-list li")
+                if not items:
+                    print(f"[i] 第 {current_page} 页无结果，停止翻页")
+                    break
+
+                for item in items:
+                    if len(articles) >= limit:
+                        break
+                    article_filtered = self._parse_article_item(item, account_name)
+                    if article_filtered:
+                        articles.append(article_filtered)
+                    # 也收集未过滤结果，以备回退
+                    if filter_active and len(all_raw) < limit:
+                        article_raw = self._parse_article_item(item, "")
+                        if article_raw:
+                            all_raw.append(article_raw)
+
+                # 若前 3 页过滤后仍无结果，切换到不过滤模式
+                if filter_active and current_page >= 3 and len(articles) == 0:
+                    print(
+                        f"[!] 前 {current_page} 页搜索结果均来自其他公众号（非「{account_name}」），"
+                        "搜狗关键词搜索未能直接召回目标账号的文章。\n"
+                        "    已切换为不过滤模式，返回所有含该关键词的文章，请通过 source 字段自行判断。\n"
+                        "    提示：若想精准抓取，请尝试使用更具唯一性的账号名称或 ID。"
+                    )
+                    filter_active = False
+                    articles = all_raw.copy()
+
+                current_page += 1
+                if current_page > MAX_PAGES:
+                    print(f"[i] 已达最大翻页限制 {MAX_PAGES} 页，停止")
+                    break
+
+                page.wait_for_timeout(self.delay_ms)
+
+        finally:
+            page.close()
 
         return articles
 
@@ -121,7 +144,7 @@ class SogouCrawler:
         if not title_el:
             return None
 
-        # 公众号名称在 .all-time-y2（不再使用不存在的 .account selector）
+        # 公众号名称在 .all-time-y2
         source_el = item.select_one(".all-time-y2")
         # 过滤非目标公众号的文章（仅在能识别来源时过滤）
         if source_el and account_name and account_name not in source_el.get_text():
@@ -144,7 +167,6 @@ class SogouCrawler:
                     int(m.group(1))
                 ).strftime("%Y-%m-%d %H:%M:%S")
         else:
-            # fallback: 尝试 "t" 属性或直接文本
             date_el = item.select_one("label.s2, span.s2, .time")
             if date_el:
                 ts = date_el.get("t")

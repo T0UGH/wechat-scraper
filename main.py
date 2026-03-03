@@ -2,7 +2,6 @@
 from __future__ import annotations
 import argparse
 import sys
-import requests
 from sogou_crawler import SogouCrawler, CaptchaRequiredError
 from article_crawler import ArticleCrawler
 from exporter import Exporter
@@ -21,22 +20,27 @@ def main():
     )
     parser.add_argument("--no-content", action="store_true", help="跳过原文抓取，只保存文章列表")
     parser.add_argument("--resume", action="store_true", help="断点续抓（跳过已抓取的文章）")
+    parser.add_argument("--no-headless", action="store_true", help="显示浏览器窗口（遇到验证码时使用）")
     args = parser.parse_args()
+
+    headless = not args.no_headless
 
     print(f"[→] 目标公众号: {args.account}")
     print(f"[→] 最多抓取: {args.limit} 篇")
+    if not headless:
+        print("[→] 浏览器模式：可见窗口")
 
     # 阶段1：搜狗抓文章列表
     print("\n[阶段1] 搜狗微信：抓取文章列表...")
-    sogou = SogouCrawler()
     try:
-        articles = sogou.get_article_list(args.account, limit=args.limit)
+        with SogouCrawler(headless=headless) as sogou:
+            articles = sogou.get_article_list(args.account, limit=args.limit)
     except CaptchaRequiredError as e:
         print(f"[!] {e}")
-        print("[!] 请在浏览器访问 https://weixin.sogou.com 完成验证后重新运行")
+        print("[!] 提示：加 --no-headless 参数以显示浏览器窗口，手动通过验证码后继续")
         sys.exit(1)
-    except requests.exceptions.RequestException as e:
-        print(f"[!] 网络请求失败: {e}")
+    except Exception as e:
+        print(f"[!] 抓取文章列表失败: {e}")
         sys.exit(1)
     print(f"[✓] 共获取 {len(articles)} 篇文章元数据")
 
