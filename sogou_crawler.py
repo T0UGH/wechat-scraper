@@ -67,12 +67,15 @@ class SogouCrawler:
                 "搜狗触发验证码保护，请使用 --no-headless 模式手动处理后重试"
             )
 
-    def get_article_list(self, account_name: str, limit: int = 100) -> list[dict]:
+    def get_article_list(self, account_name: str, limit: int = 100, resolve_urls: bool = True) -> list[dict]:
         """用 Playwright 翻页抓取文章列表元数据。
 
         先按来源过滤，只保留来自目标公众号的文章。
         若前 3 页搜索结果全被过滤（说明搜狗关键词搜索未能召回该账号文章），
         则自动切换为不过滤模式并打印提示。
+
+        resolve_urls: 是否跟随跳转解析出真实 mp.weixin.qq.com URL。
+                      仅需抓取文章列表（--no-content）时可设为 False 以加快速度。
         """
         MAX_PAGES = 50
         articles: list[dict] = []
@@ -110,7 +113,7 @@ class SogouCrawler:
                     article_raw = self._parse_article_item(item, "")
                     if not article_raw:
                         continue
-                    article_raw["url"] = self._resolve_url(article_raw["url"])
+                    article_raw["url"] = self._resolve_url(article_raw["url"]) if resolve_urls else article_raw["url"]
                     # 收集未过滤结果备用
                     if filter_active and len(all_raw) < limit:
                         all_raw.append(article_raw)

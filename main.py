@@ -34,7 +34,11 @@ def main():
     print("\n[阶段1] 搜狗微信：抓取文章列表...")
     try:
         with SogouCrawler(headless=headless) as sogou:
-            articles = sogou.get_article_list(args.account, limit=args.limit)
+            articles = sogou.get_article_list(
+                args.account,
+                limit=args.limit,
+                resolve_urls=not args.no_content,
+            )
     except CaptchaRequiredError as e:
         print(f"[!] {e}")
         print("[!] 提示：加 --no-headless 参数以显示浏览器窗口，手动通过验证码后继续")
