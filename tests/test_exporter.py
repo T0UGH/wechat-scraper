@@ -50,7 +50,7 @@ def test_export_markdown():
         assert content.startswith("---\n")
         assert "title: 测试文章标题" in content
         assert "author: 作者" in content
-        assert "url: https://mp.weixin.qq.com/s/test" in content
+        assert 'url: "https://mp.weixin.qq.com/s/test"' in content
         assert "account: test_account" in content
         assert "scraped_at:" in content
         # 验证正文在 front matter 之后

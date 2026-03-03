@@ -21,7 +21,7 @@ class Exporter:
         return os.path.join(self.output_dir, f"{safe}_{ts}.{ext}")
 
     def _article_md_filename(self, article: dict, output_dir: str) -> str:
-        """生成单篇文章的 Markdown 文件名"""
+        """生成单篇文章的 Markdown 文件名（URL hash 保证唯一）"""
         date_prefix = ""
         pd = article.get("publish_date", "")
         if pd:
@@ -30,7 +30,14 @@ class Exporter:
         title = article.get("title", "untitled")
         slug = re.sub(r'[^\w\u4e00-\u9fff-]', '', title)[:30]
         slug = slug.strip("-") or "article"
-        return os.path.join(output_dir, f"{date_prefix}{slug}.md")
+
+        # 用 URL 末8位 hash 保证文件名唯一
+        import hashlib
+        url = article.get("url", "")
+        suffix = hashlib.md5(url.encode()).hexdigest()[:8] if url else ""
+        suffix_part = f"-{suffix}" if suffix else ""
+
+        return os.path.join(output_dir, f"{date_prefix}{slug}{suffix_part}.md")
 
     def _yaml_escape(self, value: str) -> str:
         """对 YAML 字符串值做简单转义（包含特殊字符时加引号）"""
@@ -72,9 +79,9 @@ class Exporter:
                 f"title: {self._yaml_escape(article.get('title', ''))}",
                 f"author: {self._yaml_escape(article.get('author', ''))}",
                 f"publish_date: {self._yaml_escape(article.get('publish_date', ''))}",
-                f"url: {article.get('url', '')}",
+                f"url: {self._yaml_escape(article.get('url', ''))}",
                 f"digest: {self._yaml_escape(article.get('digest', ''))}",
-                f"cover_url: {article.get('cover_url', '')}",
+                f"cover_url: {self._yaml_escape(article.get('cover_url', ''))}",
                 f"read_count: \"{article.get('read_count', '')}\"",
                 f"account: {self._yaml_escape(account)}",
                 f"scraped_at: {scraped_at}",
