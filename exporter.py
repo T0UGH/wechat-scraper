@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 import json
 import os
 import csv
@@ -32,7 +33,6 @@ class Exporter:
         slug = slug.strip("-") or "article"
 
         # 用 URL 末8位 hash 保证文件名唯一
-        import hashlib
         url = article.get("url", "")
         suffix = hashlib.md5(url.encode()).hexdigest()[:8] if url else ""
         suffix_part = f"-{suffix}" if suffix else ""

@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 output/
 progress.json
+progress_*.json
 .pytest_cache/
 .DS_Store
 *.log

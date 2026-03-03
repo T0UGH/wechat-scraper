@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import sys
+import requests
 from sogou_crawler import SogouCrawler, CaptchaRequiredError
 from article_crawler import ArticleCrawler
 from exporter import Exporter
@@ -33,6 +34,9 @@ def main():
     except CaptchaRequiredError as e:
         print(f"[!] {e}")
         print("[!] 请在浏览器访问 https://weixin.sogou.com 完成验证后重新运行")
+        sys.exit(1)
+    except requests.exceptions.RequestException as e:
+        print(f"[!] 网络请求失败: {e}")
         sys.exit(1)
     print(f"[✓] 共获取 {len(articles)} 篇文章元数据")
 
