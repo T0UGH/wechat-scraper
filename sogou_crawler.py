@@ -106,16 +106,18 @@ class SogouCrawler:
                 for item in items:
                     if len(articles) >= limit:
                         break
-                    article_filtered = self._parse_article_item(item, account_name)
-                    if article_filtered:
-                        article_filtered["url"] = self._resolve_url(article_filtered["url"])
-                        articles.append(article_filtered)
-                    # 也收集未过滤结果，以备回退
+                    # 先解析一次（不过滤），跟随跳转拿真实 URL（避免重复跳转）
+                    article_raw = self._parse_article_item(item, "")
+                    if not article_raw:
+                        continue
+                    article_raw["url"] = self._resolve_url(article_raw["url"])
+                    # 收集未过滤结果备用
                     if filter_active and len(all_raw) < limit:
-                        article_raw = self._parse_article_item(item, "")
-                        if article_raw:
-                            article_raw["url"] = self._resolve_url(article_raw["url"])
-                            all_raw.append(article_raw)
+                        all_raw.append(article_raw)
+                    # 判断是否通过来源过滤
+                    source = article_raw.get("source", "")
+                    if not account_name or not source or account_name in source:
+                        articles.append(article_raw)
 
                 # 若前 3 页过滤后仍无结果，切换到不过滤模式
                 if filter_active and current_page >= 3 and len(articles) == 0:
