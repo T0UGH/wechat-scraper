@@ -1,7 +1,7 @@
 from __future__ import annotations
 import time
 import random
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError, Page
 
 try:
     from playwright_stealth import stealth_sync
@@ -47,7 +47,7 @@ class ArticleCrawler:
                 page.wait_for_selector("#js_content", timeout=10000)
             except PlaywrightTimeoutError:
                 result["error"] = "content_not_found"
-                return result
+                # fall through to finally — do NOT return here
 
             result["title"] = self._safe_text(page, "#activity-name")
             result["author"] = (
@@ -72,7 +72,7 @@ class ArticleCrawler:
 
         return result
 
-    def _safe_text(self, page, selector: str) -> str:
+    def _safe_text(self, page: Page, selector: str) -> str:
         try:
             el = page.query_selector(selector)
             return el.inner_text().strip() if el else ""
@@ -83,3 +83,9 @@ class ArticleCrawler:
         self.context.close()
         self.browser.close()
         self._playwright.stop()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()

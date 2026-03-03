@@ -10,6 +10,9 @@ def test_fetch_article_returns_content():
     # 至少返回字典结构（URL 可能已失效，所以只验证结构）
     assert isinstance(result, dict)
     assert "url" in result
+    assert "title" in result
+    assert "publish_date" in result
+    assert "error" in result
     assert "content_text" in result
     assert "content_html" in result
     assert "author" in result
